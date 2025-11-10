@@ -2,13 +2,14 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from src.core.common import singleton
+from src.core.settings.graphql import GraphQLSettings
 from src.core.settings.logger import LoggerSettings
 from src.core.settings.postgres import PostgreSQLSettings
+from src.core.settings.queues import QueuesSettings
+from src.core.settings.rabbitmq import RabbitMQSettings
 from src.core.settings.security import SecuritySettings
 
 
-@singleton
 class Settings(BaseSettings):
     APP_TITLE: str = "Default Title"
     APP_DESCRIPTION: str = "Default Description"
@@ -25,6 +26,10 @@ class Settings(BaseSettings):
 
     POSTGRES: PostgreSQLSettings = PostgreSQLSettings()
     SECURITY: SecuritySettings = SecuritySettings()
+
+    RABBITMQ: RabbitMQSettings = RabbitMQSettings()
+    QUEUES: QueuesSettings = QueuesSettings()
+    GRAPHQL: GraphQLSettings = GraphQLSettings()
 
     API_PREFIX: str = "/api"
 

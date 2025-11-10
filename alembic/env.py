@@ -23,6 +23,7 @@ from sqlalchemy.orm import sessionmaker
 from alembic import context
 from src.core.db.base_models import BaseModel
 from src.core.settings import settings
+import src.emails_system.models  # noqa: F401
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

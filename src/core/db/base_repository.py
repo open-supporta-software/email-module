@@ -117,6 +117,7 @@ class BaseRepository[ModelType, EntityType, CreateEntityType, UpdateEntityType]:
         model = self._model(**data.model_dump(exclude_unset=True, exclude_none=True))  # pyright: ignore[reportAttributeAccessIssue]
         self._session.add(model)
         await self._session.flush()
+        await self._session.refresh(model)
 
         return self._to_entity(model)
 

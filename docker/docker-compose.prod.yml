@@ -1,18 +1,21 @@
 services:
   app:
     build:
-      context: .
-      dockerfile: docker/Dockerfile.prod
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run uvicorn src.main:app --host 0.0.0.0 --port 8000
     ports:
       - target: 8000
         published: 8000
         protocol: tcp
         mode: host
     volumes:
-      - .:/src
+      - ..:/src
     env_file: ../.env
     depends_on:
       db:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     deploy:
       placement:
@@ -33,7 +36,7 @@ services:
         max_attempts: 3
         window: 120s
     healthcheck:
-      test: curl -sS http://127.0.0.1:8000/api/v1/public/healthcheck || echo 1
+      test: curl -sS http://127.0.0.1:8000/api/v1/utils/healthcheck || echo 1
       interval: 30s
       timeout: 3s
       retries: 12
@@ -50,6 +53,192 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      placement:
+        constraints:
+          - "node.labels.TAG==prod"
+      replicas: 1
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+        delay: 15s
+      rollback_config:
+        parallelism: 0
+        order: stop-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    env_file: ../.env
+    healthcheck:
+      test: rabbitmq-diagnostics -q check_port_connectivity
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      placement:
+        constraints:
+          - "node.labels.TAG==prod"
+      replicas: 1
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+        delay: 15s
+      rollback_config:
+        parallelism: 0
+        order: stop-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  emails_sender_worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run faststream run src.workers.emails_sender.main:app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    env_file: ../.env
+    volumes:
+      - ../src:/app/src
+    deploy:
+      placement:
+        constraints:
+          - "node.labels.TAG==prod"
+      replicas: 1
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+        delay: 15s
+      rollback_config:
+        parallelism: 0
+        order: stop-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  emails_consumer_worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run faststream run src.workers.emails_consumer.main:app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    env_file: ../.env
+    volumes:
+      - ../src:/app/src
+    deploy:
+      placement:
+        constraints:
+          - "node.labels.TAG==prod"
+      replicas: 1
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+        delay: 15s
+      rollback_config:
+        parallelism: 0
+        order: stop-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  tickets_maker_worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run faststream run src.workers.tickets_maker.main:app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    env_file: ../.env
+    volumes:
+      - ../src:/app/src
+    deploy:
+      placement:
+        constraints:
+          - "node.labels.TAG==prod"
+      replicas: 1
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+        delay: 15s
+      rollback_config:
+        parallelism: 0
+        order: stop-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  comments_maker_worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run faststream run src.workers.comments_maker.main:app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    env_file: ../.env
+    volumes:
+      - ../src:/app/src
+    deploy:
+      placement:
+        constraints:
+          - "node.labels.TAG==prod"
+      replicas: 1
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+        delay: 15s
+      rollback_config:
+        parallelism: 0
+        order: stop-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  comments_reader_worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run faststream run src.workers.comments_reader.main:app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    env_file: ../.env
+    volumes:
+      - ../src:/app/src
     deploy:
       placement:
         constraints:

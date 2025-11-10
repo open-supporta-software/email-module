@@ -7,6 +7,12 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready", "-d", "$POSTGRES_DB" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   adminer:
     image: adminer
@@ -14,16 +20,93 @@ services:
     ports:
       - "8080:8080"
 
-  maildev:
-    image: maildev/maildev
+  greenmail:
+    image: greenmail/standalone:latest
+    container_name: greenmail
     restart: unless-stopped
     environment:
-      - TZ=Asia/Yekaterinburg
-      - MAILDEV_WEB_PORT=1080
-      - MAILDEV_SMTP_PORT=1025
+      GREENMAIL_VERBOSE: "true"
+      GREENMAIL_USERS: |
+        client@local.dev:password1
+        support@local.dev:password2
     ports:
-      - "8085:1080"
-      - "1025:1025"
+      - "3025:3025"   # SMTP
+      - "3143:3143"   # IMAP
+      - "3993:3993"   # IMAPS
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    env_file: ../.env
+    healthcheck:
+      test: rabbitmq-diagnostics -q check_port_connectivity
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  emails_sender_worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run faststream run src.workers.emails_sender.main:app --reload
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      greenmail:
+        condition: service_started
+    env_file: ../.env
+    volumes:
+      - ../src:/app/src
+
+  emails_consumer_worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run faststream run src.workers.emails_consumer.main:app --reload
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      greenmail:
+        condition: service_started
+      db:
+        condition: service_healthy
+    env_file: ../.env
+    volumes:
+      - ../src:/app/src
+
+  tickets_maker_worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run faststream run src.workers.tickets_maker.main:app --reload
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    env_file: ../.env
+    volumes:
+      - ../src:/app/src
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --no-access-log --reload
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    env_file: ../.env
+    volumes:
+      - ../src:/app/src
 
 volumes:
   pgdata:
