@@ -4,9 +4,9 @@
 MAKEFLAGS += --no-print-directory
 
 # Variables
-DOCKER_COMPOSE_DEV = docker-compose -f docker/docker-compose.dev.yml
-DOCKER_COMPOSE_PROD = docker-compose -f docker/docker-compose.prod.yml
-DOCKER_COMPOSE_TEST = docker-compose -f docker/docker-compose.tests.yml
+DOCKER_COMPOSE_DEV = docker compose -f docker/docker-compose.dev.yml --project-name supporta-email-module
+DOCKER_COMPOSE_PROD = docker compose -f docker/docker-compose.prod.yml --project-name supporta-email-module
+DOCKER_COMPOSE_TEST = docker compose -f docker/docker-compose.tests.yml --project-name supporta-email-module
 DOCKER = docker
 ALEMBIC = alembic
 UV = uv
@@ -90,7 +90,7 @@ verify: format lint type-check
 # Start the app using hypercorn
 .PHONY: start
 start:
-	$(UV) run $(UVICORN) src.main:app --host 0.0.0.0 --port 8000 --no-access-log --log-level critical
+	$(UV) run $(UVICORN) src.main:app --host 0.0.0.0 --port 8000 --no-access-log
 
 # Create .env file from example.env on Unix systems
 .PHONY: create-env-unix
@@ -124,7 +124,7 @@ winit: install-deps create-env-windows
 
 # Start the development environment and the app
 .PHONY: dev
-dev: up-dev migrate start
+dev: up-dev
 
 # Clear db
 .PHONY: clear-db
@@ -135,3 +135,19 @@ clear-db:
 .PHONY: clear-db-tests
 clear-db-tests:
 	$(DOCKER) volume rm docker_pgdata_tests
+
+
+# Read client emails
+.PHONY: read-client-emails
+read-client-emails:
+	$(UV) run python scripts/read_client_emails.py
+
+# Read support emails
+.PHONY: read-support-emails
+read-support-emails:
+	$(UV) run python scripts/read_support_emails.py
+
+# Send complaint email
+.PHONY: send-complaint
+send-complaint:
+	$(UV) run python scripts/send_complaint_email.py
