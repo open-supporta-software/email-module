@@ -61,7 +61,7 @@ class GraphQLClient:
         result = await self._send_request(query, variables)
 
         if "errors" in result:
-            any(
+            is_auth_error = any(
                 err.get("message")
                 in {
                     "You do not have access to this resource",
@@ -71,6 +71,12 @@ class GraphQLClient:
                 or err.get("name") == "AccessDeniedError"
                 for err in result["errors"]
             )
+
+            if is_auth_error:
+                logger.warning("♻️ GraphQLClient: Token expired or invalid. Re-authenticating...")
+                await self._authenticate()
+                # Retry the request with the new token
+                result = await self._send_request(query, variables)
 
         return result
 

@@ -54,7 +54,7 @@ async def handle_read_comments(task: CheckCommentsTask):
 
         if not email_settings:
             logger.warning(
-                "⚠️ Reader: Не найдены настройки email для организации %s",  # noqa: RUF001
+                "⚠️ Reader: Не найдены настройки email для организации %s",
                 task.organization_id,
             )
             return
@@ -72,7 +72,6 @@ async def handle_read_comments(task: CheckCommentsTask):
           }
           ticket: {
             organization: { id: $organizationId },
-            status: { id: "aa5ed9c2-90ca-4042-8194-d3ed23cb7919" },
             source: { id: "0e9af80b-b5f0-4667-9f8e-577f1cab1a21" }
           }
         }
@@ -122,7 +121,7 @@ async def handle_read_comments(task: CheckCommentsTask):
             stmt = select(SentComment).where(SentComment.comment_id == comment_id)
             result = await session.execute(stmt)
             if result.scalar_one_or_none():
-                logger.warning("жопа")
+                logger.info("Reader: Комментарий %s уже обработан", comment_id)
                 continue
 
             ticket = comment.get("ticket")
@@ -155,7 +154,7 @@ async def handle_read_comments(task: CheckCommentsTask):
             else:
                 new_sent_comment.is_sent = False
                 new_sent_comment.error_message = "No email found"
-                logger.info("Reader: Не удалось отправить комментарий %s: нет email", comment_id)  # noqa: RUF001
+                logger.info("Reader: Не удалось отправить комментарий %s: нет email", comment_id)
 
             session.add(new_sent_comment)
 
