@@ -75,14 +75,14 @@ async def fetch_unseen_emails(host: str, port: int, login: str, password: str) -
             fetch_status = getattr(res_fetch, "result", str(res_fetch))
 
             if fetch_status != "OK":
-                logger.warning("Не удалось скачать письмо %s", msg_id)  # noqa: RUF001
+                logger.warning("Не удалось скачать письмо %s", msg_id)
                 continue
 
             # Получаем данные письма. Обычно они во втором элементе lines (индекс 1)
             # Структура ответа fetch сложная, lines это список байт
             # res_fetch.lines[1] обычно содержит тело письма
             msg_data_lines = getattr(res_fetch, "lines", [])
-            if len(msg_data_lines) < 2:  # noqa: PLR2004
+            if len(msg_data_lines) < 2:
                 logger.warning("Странный ответ fetch для %s", msg_id)
                 continue
 

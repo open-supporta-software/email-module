@@ -43,7 +43,8 @@ async def handle_send_email(task: SendEmailEntity):
                 port=email_settings.smtp_port,
                 username=email_settings.email_login,
                 password=email_settings.email_password,
-                start_tls=not settings.DEBUG,
+                use_tls=email_settings.smtp_port == 465,
+                start_tls=email_settings.smtp_port != 465,
             )
 
             logger.info("✅ Sender: Письмо успешно отправлено на %s", task.to)

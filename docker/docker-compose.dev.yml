@@ -92,6 +92,32 @@ services:
     volumes:
       - ../src:/app/src
 
+  comments_reader_worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run faststream run src.workers.comments_reader.main:app --reload
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    env_file: ../.env
+    volumes:
+      - ../src:/app/src
+
+  comments_maker_worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run faststream run src.workers.comments_maker.main:app --reload
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    env_file: ../.env
+    volumes:
+      - ../src:/app/src
+
   app:
     build:
       context: ..

@@ -1,14 +1,13 @@
 import logging
 from email.utils import parseaddr
 
-import httpx
 from faststream import FastStream
 from faststream.rabbit import RabbitBroker
 
 from src.core.db import postgres_session_manager
 from src.core.integration.graphql import graphql_client
 from src.core.settings import settings
-from src.emails_system.entities import CreateCommentTask, ProcessEmailTask, SendEmailEntity
+from src.emails_system.entities import CreateCommentTask, ProcessEmailTask
 from src.emails_system.models.received_email import ReceivedEmail
 
 logging.basicConfig(level=logging.INFO)
@@ -56,22 +55,19 @@ async def handle_process_email(task: ProcessEmailTask):  # noqa: C901, PLR0912, 
     """
 
     existing_ticket = None
-    try:
-        existing_result = await graphql_client.execute(
-            existing_ticket_query,
-            {"organizationId": str(task.organization_id), "email": email},
+    existing_result = await graphql_client.execute(
+        existing_ticket_query,
+        {"organizationId": str(task.organization_id), "email": email},
+    )
+    tickets = existing_result.get("data", {}).get("allTickets", [])
+    if tickets:
+        existing_ticket = tickets[0]
+        logger.info(
+            "🎫 Processor: Найден существующий тикет %s (№%s) для %s",
+            existing_ticket["id"],
+            existing_ticket.get("number", "N/A"),
+            email,
         )
-        tickets = existing_result.get("data", {}).get("allTickets", [])
-        if tickets:
-            existing_ticket = tickets[0]
-            logger.info(
-                "🎫 Processor: Найден существующий тикет %s (№%s) для %s",
-                existing_ticket["id"],
-                existing_ticket.get("number", "N/A"),
-                email,
-            )
-    except Exception:
-        logger.exception("⚠️ Processor: Ошибка при проверке существующих тикетов")
 
     # Если найден существующий тикет - создаем комментарий
     if existing_ticket:
@@ -103,8 +99,8 @@ async def handle_process_email(task: ProcessEmailTask):  # noqa: C901, PLR0912, 
                 await session.commit()
                 logger.info("💾 Processor: Письмо сохранено (комментарий).")
             except Exception:
-                logger.exception("Ошибка сохранения письма")
-                await session.rollback()
+                logger.exception("Ошибка сохранения письма (комментарий)")
+                raise  # Re-raise to retry saving
         return
 
     # 3. Check if contact exists
@@ -118,19 +114,15 @@ async def handle_process_email(task: ProcessEmailTask):  # noqa: C901, PLR0912, 
       }
     }
     """
+    # Removed try/except
+    contact_result = await graphql_client.execute(get_contact_query, {"email": email})
 
-    try:
-        contact_result = await graphql_client.execute(get_contact_query, {"email": email})
-
-        contacts = contact_result.get("data", {}).get("allContacts", [])
-        if contacts:
-            contact_id = contacts[0]["id"]
-            logger.info("👤 Processor: Found existing contact: %s", contact_id)
-        else:
-            logger.info("👤 Processor: Contact not found. Creation is currently disabled.")
-
-    except Exception:
-        logger.exception("⚠️ Processor: Error during contact check")
+    contacts = contact_result.get("data", {}).get("allContacts", [])
+    if contacts:
+        contact_id = contacts[0]["id"]
+        logger.info("👤 Processor: Found existing contact: %s", contact_id)
+    else:
+        logger.info("👤 Processor: Contact not found. Creation is currently disabled.")
 
     # 4. Check/Create Property
     property_id = None
@@ -143,48 +135,49 @@ async def handle_process_email(task: ProcessEmailTask):  # noqa: C901, PLR0912, 
     }
     """
 
-    try:
-        property_result = await graphql_client.execute(
-            get_property_query, {"organizationId": str(task.organization_id)}
+    # Removed try/except
+    property_result = await graphql_client.execute(
+        get_property_query, {"organizationId": str(task.organization_id)}
+    )
+    properties = property_result.get("data", {}).get("allProperties", [])
+    if properties:
+        property_id = properties[0]["id"]
+        logger.info("🏢 Processor: Found existing property: %s", property_id)
+    else:
+        logger.info("🏢 Processor: Property not found. Creating new one.")
+        create_property_mutation = """
+        mutation CreateProperty($data: PropertyCreateInput!) {
+            createProperty(data: $data) {
+            id
+            }
+        }
+        """
+        property_data = {
+            "dv": 1,
+            "sender": {"dv": 1, "fingerprint": "4916dd67913b4af8a5f3e3cf72cfa9e3"},
+            "organization": {"connect": {"id": str(task.organization_id)}},
+            "type": "building",
+            "address": "г Екатеринбург, ул Мира, д 32",
+            "name": "ИРИТ-РТФ",
+            "area": "7",
+            "yearOfConstruction": None,
+        }
+        create_prop_result = await graphql_client.execute(
+            create_property_mutation, {"data": property_data}
         )
-        properties = property_result.get("data", {}).get("allProperties", [])
-        if properties:
-            property_id = properties[0]["id"]
-            logger.info("🏢 Processor: Found existing property: %s", property_id)
-        else:
-            logger.info("🏢 Processor: Property not found. Creating new one.")
-            create_property_mutation = """
-            mutation CreateProperty($data: PropertyCreateInput!) {
-              createProperty(data: $data) {
-                id
-              }
-            }
-            """
-            property_data = {
-                "dv": 1,
-                "sender": {"dv": 1, "fingerprint": "4916dd67913b4af8a5f3e3cf72cfa9e3"},
-                "organization": {"connect": {"id": str(task.organization_id)}},
-                "type": "building",
-                "address": "г Екатеринбург, ул Мира, д 32",  # noqa: RUF001
-                "name": "ИРИТ-РТФ",
-                "area": "7",
-                "yearOfConstruction": None,
-            }
-            create_prop_result = await graphql_client.execute(
-                create_property_mutation, {"data": property_data}
+        if "errors" in create_prop_result:
+            logger.error(
+                "❌ Processor: Failed to create property: %s", create_prop_result["errors"]
             )
-            if "errors" in create_prop_result:
-                logger.error(
-                    "❌ Processor: Failed to create property: %s", create_prop_result["errors"]
-                )
-            else:
-                property_id = (
-                    create_prop_result.get("data", {}).get("createProperty", {}).get("id")
-                )
-                logger.info("✅ Processor: Created new property: %s", property_id)
+            # Smart Check
+            errors_str = str(create_prop_result["errors"])
+            if "Constraint" in errors_str or "Validation" in errors_str:
+                logger.error("❌ Processor: Hard Property Creation Error. Dropping task.")
+                return
 
-    except Exception:
-        logger.exception("⚠️ Processor: Error during property check/creation")
+            raise ValueError(f"Property creation error: {create_prop_result['errors']}")
+        property_id = create_prop_result.get("data", {}).get("createProperty", {}).get("id")
+        logger.info("✅ Processor: Created new property: %s", property_id)
 
     if not property_id:
         property_id = "51a649ec-8ca4-4947-b13a-7b086af58f3b"
@@ -271,25 +264,22 @@ async def handle_process_email(task: ProcessEmailTask):  # noqa: C901, PLR0912, 
             "propertyId": property_id,
         }
 
-    ticket_created = False
-    try:
-        result = await graphql_client.execute(mutation, variables)
+    # Removed try/except
+    result = await graphql_client.execute(mutation, variables)
 
-        if "errors" in result:
-            logger.error("❌ Processor: GraphQL Error: %s", result["errors"])
-        else:
-            logger.info(
-                "✅ Processor: Ticket created: %s",
-                result.get("data", {}).get("createTicket", {}).get("id"),
-            )
-            ticket_created = True
+    if "errors" in result:
+        logger.error("❌ Processor: GraphQL Error: %s", result["errors"])
+        errors_str = str(result["errors"])
+        if "Constraint" in errors_str or "Validation" in errors_str or "not found" in errors_str:
+            logger.error("❌ Processor: Hard Ticket Creation Error. Dropping task.")
+            return
 
-    except httpx.HTTPStatusError as e:
-        logger.exception(
-            "⚠️ Processor: GraphQL HTTP Error %s: %s", e.response.status_code, e.response.text
-        )
-    except Exception:
-        logger.exception("⚠️ Processor: Failed to create ticket via GraphQL")
+        raise ValueError(f"Ticket creation error: {result['errors']}")
+    logger.info(
+        "✅ Processor: Ticket created: %s",
+        result.get("data", {}).get("createTicket", {}).get("id"),
+    )
+    ticket_created = True
 
     async with postgres_session_manager.session_factory.begin() as session:
         try:
@@ -305,18 +295,7 @@ async def handle_process_email(task: ProcessEmailTask):  # noqa: C901, PLR0912, 
             await session.commit()
             logger.info("💾 Processor: Успешно сохранено.")
 
-            # Отправляем автоответ пользователю
-            try:
-                auto_reply = SendEmailEntity(
-                    settings_id=task.settings_id,
-                    to=task.from_email,
-                    subject="Ваша жалоба принята",
-                    body="Ваша жалоба принята, скоро вам ответит оператор",
-                )
-                await broker.publish(auto_reply, queue=settings.QUEUES.SEND_EMAILS)
-                logger.info("📨 Processor: Автоответ отправлен на %s", task.from_email)
-            except Exception:
-                logger.exception("⚠️ Processor: Ошибка отправки автоответа (письмо сохранено)")
         except Exception:
             logger.exception("Ошибка сохранения")
             await session.rollback()
+            raise

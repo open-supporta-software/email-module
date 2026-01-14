@@ -1,6 +1,5 @@
 import logging
 
-import httpx
 from faststream import FastStream
 from faststream.rabbit import RabbitBroker
 
@@ -30,17 +29,20 @@ async def handle_create_comment(task: CreateCommentTask):
     }
     """
 
-    user_id = None
-    try:
-        user_result = await graphql_client.execute(get_user_query)
-        user_id = user_result.get("data", {}).get("authenticatedUser", {}).get("id")
-        if user_id:
-            logger.info("👤 Comment Maker: Используется пользователь: %s", user_id)
-        else:
-            logger.error("❌ Comment Maker: Не удалось получить ID пользователя")  # noqa: RUF001
-            return
-    except Exception:
-        logger.exception("⚠️ Comment Maker: Ошибка получения текущего пользователя")
+    user_result = await graphql_client.execute(get_user_query)
+
+    if "errors" in user_result:
+        logger.error("❌ Comment Maker: GraphQL Error getting user: %s", user_result["errors"])
+        raise ValueError(f"GraphQL Error getting user: {user_result['errors']}")
+
+    user_id = user_result.get("data", {}).get("authenticatedUser", {}).get("id")
+    if user_id:
+        logger.info("👤 Comment Maker: Используется пользователь: %s", user_id)
+    else:
+        logger.error(
+            "❌ Comment Maker: Не удалось получить ID пользователя (Config Warning). "
+            "Задача НЕ будет возвращена в очередь во избежание цикла."
+        )
         return
 
     comment_content = f"Ответ пользователя:\n\n{task.body or ''}"
@@ -68,20 +70,17 @@ async def handle_create_comment(task: CreateCommentTask):
         "sender": {"dv": 1, "fingerprint": "4916dd67913b4af8a5f3e3cf72cfa9e3"},
     }
 
-    try:
-        result = await graphql_client.execute(create_comment_mutation, {"data": comment_data})
+    result = await graphql_client.execute(create_comment_mutation, {"data": comment_data})
 
-        if "errors" in result:
-            logger.error("❌ Comment Maker: GraphQL Error: %s", result["errors"])
-        else:
-            comment_id = result.get("data", {}).get("createTicketComment", {}).get("id")
-            logger.info("✅ Comment Maker: Комментарий создан: %s", comment_id)
+    if "errors" in result:
+        logger.error("❌ Comment Maker: GraphQL Error: %s", result["errors"])
+        errors_str = str(result["errors"])
+        if "Constraint" in errors_str or "Validation" in errors_str or "not found" in errors_str:
+            logger.error(
+                "❌ Comment Maker: Hard Logic Error (probably ticket missing). Dropping task."
+            )
+            return
 
-    except httpx.HTTPStatusError as e:
-        logger.exception(
-            "⚠️ Comment Maker: GraphQL HTTP Error %s: %s",
-            e.response.status_code,
-            e.response.text,
-        )
-    except Exception:
-        logger.exception("⚠️ Comment Maker: Ошибка создания комментария через GraphQL")
+        raise ValueError(f"GraphQL Error: {result['errors']}")
+    comment_id = result.get("data", {}).get("createTicketComment", {}).get("id")
+    logger.info("✅ Comment Maker: Комментарий создан: %s", comment_id)
