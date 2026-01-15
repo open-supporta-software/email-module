@@ -67,9 +67,6 @@ async def handle_read_comments(task: CheckCommentsTask):
       allTicketComments(
         where: {
           type: organization,
-          user: {
-            type_not: service
-          }
           ticket: {
             organization: { id: $organizationId },
             source: { id: "0e9af80b-b5f0-4667-9f8e-577f1cab1a21" }
@@ -81,6 +78,9 @@ async def handle_read_comments(task: CheckCommentsTask):
         id
         content
         createdAt
+        user {
+          id
+        }
         ticket {
           id
           number
@@ -98,6 +98,7 @@ async def handle_read_comments(task: CheckCommentsTask):
             query, {"organizationId": str(task.organization_id)}
         )
         comments = response.get("data", {}).get("allTicketComments", [])
+
         logger.warning(comments)
     except httpx.HTTPStatusError:
         logger.exception("❌ Reader: GraphQL Error:")
@@ -116,6 +117,12 @@ async def handle_read_comments(task: CheckCommentsTask):
     async with postgres_session_manager.session_factory.begin() as session:
         for comment in comments:
             comment_id = comment["id"]
+            if (
+                comment.get("user")
+                and comment["user"].get("id") in settings.IGNORE_SERVICE_ACCOUNT_IDS
+            ):
+                continue
+
 
             # Проверяем, отправляли ли уже
             stmt = select(SentComment).where(SentComment.comment_id == comment_id)

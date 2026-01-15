@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     QUEUES: QueuesSettings = QueuesSettings()
     GRAPHQL: GraphQLSettings = GraphQLSettings()
 
+    IGNORE_SERVICE_ACCOUNT_IDS: list[str] = []
+
     API_PREFIX: str = "/api"
 
     model_config = SettingsConfigDict(
